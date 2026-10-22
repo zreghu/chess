@@ -1,5 +1,5 @@
-use crate::bitboard::BitBoard;
-use crate::game::{Color, Piece, Square};
+use crate::bitboard::{BitBoard, BitBoardIter};
+use crate::game::{Color, Piece};
 use crate::squares::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +22,24 @@ pub struct Board {
 }
 
 impl Board {
+    pub fn empty() -> Self {
+        Board {
+            white_king  : 0u64,
+            white_queen : 0u64,
+            white_rook  : 0u64,
+            white_bishop: 0u64,
+            white_knight: 0u64,
+            white_pawn  : 0u64,
+
+            black_king  : 0u64,
+            black_queen : 0u64,
+            black_rook  : 0u64,
+            black_bishop: 0u64,
+            black_knight: 0u64,
+            black_pawn  : 0u64,
+        }
+    }
+
     pub fn starting_position() -> Self {
         Board {
             white_king  : E1,
@@ -78,7 +96,7 @@ impl Board {
         }
     }
 
-    pub fn get_piece_positions(&self, piece: Piece, color: Color) -> Vec<Square> {
+    pub fn get_piece_positions(&self, piece: Piece, color: Color) -> BitBoardIter {
         get_bitmask_positions(self.piece_board(piece, color))
     }
 
@@ -100,13 +118,8 @@ impl Board {
     }
 }
 
-pub fn get_bitmask_positions(mut mask: BitBoard) -> Vec<Square> {
-    let mut positions = Vec::with_capacity(mask.count_ones() as usize);
-    while mask != 0 {
-        positions.push(mask.trailing_zeros() as usize);
-        mask &= mask - 1;
-    }
-    positions
+pub fn get_bitmask_positions(bits: BitBoard) -> BitBoardIter {
+    BitBoardIter { bits }
 }
 
 pub fn print_board(board: &Board) {

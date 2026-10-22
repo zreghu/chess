@@ -1,4 +1,25 @@
+use crate::game::Square;
+
 pub type BitBoard = u64;
+
+#[derive(Clone)]
+pub struct BitBoardIter {
+    pub bits: BitBoard,
+}
+
+impl Iterator for BitBoardIter {
+    type Item = Square;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.bits == 0 {
+            return None;
+        }
+
+        let square = self.bits.trailing_zeros() as Square;
+        self.bits &= self.bits - 1;
+        Some(square)
+    }
+}
 
 pub fn print_bitboard(bitboard: BitBoard) {
     for rank in (0..8).rev() {

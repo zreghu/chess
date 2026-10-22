@@ -3,3 +3,4 @@ pub mod board;
 pub mod attack;
 pub mod game;
 pub mod squares;
+pub mod fen;

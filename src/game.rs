@@ -2,6 +2,7 @@ use crate::board::*;
 use crate::bitboard::BitBoard;
 use crate::attack::*;
 use crate::squares::*;
+use crate::fen::chess_to_fen;
 
 pub type Square = usize;
 
@@ -28,7 +29,7 @@ pub enum CastleSide {
 }
 
 impl Piece {
-    const ALL: [Piece; 6] = [
+    pub const ALL: [Piece; 6] = [
         Piece::King,
         Piece::Queen,
         Piece::Rook,
@@ -47,20 +48,32 @@ pub enum Move {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CastlingAvailability {
-    white_king_side: bool,
-    white_queen_side: bool,
-    black_king_side: bool,
-    black_queen_side: bool,
+pub struct CastlingAvailability {
+    pub white_king_side: bool,
+    pub white_queen_side: bool,
+    pub black_king_side: bool,
+    pub black_queen_side: bool,
 }
 
-impl CastlingAvailability {
-    pub fn new() -> Self {
+
+impl Default for CastlingAvailability {
+    fn default() -> Self {
         CastlingAvailability {
             white_king_side:  true,
             white_queen_side: true,
             black_king_side:  true,
             black_queen_side: true,
+        }
+    }
+}
+
+impl CastlingAvailability {
+    pub fn empty() -> Self {
+        CastlingAvailability {
+            white_king_side:  false,
+            white_queen_side: false,
+            black_king_side:  false,
+            black_queen_side: false,
         }
     }
 
@@ -105,17 +118,11 @@ pub struct Chess {
 
 impl Default for Chess {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Chess {
-    pub fn new() -> Self {
         Chess {
             board: Board::starting_position(),
             en_passant: None,
             turn: Color::White,
-            castling_availability: CastlingAvailability::new(),
+            castling_availability: CastlingAvailability::default(),
             half_move_number: 0,
             full_move_number: 1,
         }
@@ -164,6 +171,8 @@ fn sq_attacks(state: &Chess, sq: Square, color: Color) -> BitBoard {
 fn all_attacks(state: &Chess, color: Color) -> BitBoard {
     let mut attacks = 0u64;
     for piece in Piece::ALL {
+        
+
         for sq in state.board.get_piece_positions(piece, color) {
             attacks |= piece_legal_attack_bitboard(state, piece, sq, color);
         }
@@ -296,7 +305,7 @@ fn is_pseudo_legal(state: &Chess, mv: Move) -> bool {
     }
 }
 
-fn make_move_unsafe(state: &mut Chess, mv: Move) -> UndoState {
+pub fn make_move_unsafe(state: &mut Chess, mv: Move) -> UndoState {
     let mut undo_state = UndoState { 
         capture_piece: None, 
         en_passant : state.en_passant,
@@ -442,39 +451,84 @@ pub fn chess_move(state: &mut Chess, mv: Move) -> Option<UndoState> {
     Some(undo)
 }
 
-pub fn all_moves(state: &mut Chess) -> Vec<Move> {
-    let mut moves = Vec::new();
-    moves.push(Move::Castle { side: CastleSide::KingSide });
-    moves.push(Move::Castle { side: CastleSide::QueenSide });
+pub fn generate_legal_moves(state: &mut Chess) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(256);
+    let color = state.turn;
+
+    if is_castle_valid(state, CastleSide::KingSide) {
+        moves.push(Move::Castle { side: CastleSide::KingSide });
+    }
+
+    if is_castle_valid(state, CastleSide::QueenSide){
+        moves.push(Move::Castle { side: CastleSide::QueenSide });
+    }
+
     for piece in Piece::ALL {
         for from in state.board.get_piece_positions(piece, state.turn) {
             for to in get_bitmask_positions(piece_legal_move_bitboard(state, piece, from, state.turn)) {
                 if piece == Piece::Pawn && (to / 8) == (if state.turn == Color::White { 7 } else { 0 }) {
-                    moves.push(Move::Promotion { from, to, promotion: Piece::Queen });
-                    moves.push(Move::Promotion { from, to, promotion: Piece::Rook });
-                    moves.push(Move::Promotion { from, to, promotion: Piece::Bishop });
-                    moves.push(Move::Promotion { from, to, promotion: Piece::Knight });
+                    for piece in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight] {
+                        let mv = Move::Promotion { from, to, promotion: piece };
+                        let undo = make_move_unsafe(state, mv);
+                        if !check(state, color) {
+                            moves.push(mv);
+                        }
+                        undo_move(state, mv, undo);
+                    }
+                } else {
+                    let mv = Move::Normal { piece, from, to };
+                    let undo = make_move_unsafe(state, mv);
+                    if !check(state, color) {
+                        moves.push(mv);
+                    }
+                    undo_move(state, mv, undo);
+                }
+            }
+        }
+    }
+
+    moves
+}
+
+pub fn generate_pseudo_legal_moves(state: &mut Chess) -> Vec<Move> {
+    let mut moves = Vec::with_capacity(256);
+
+    if is_castle_valid(state, CastleSide::KingSide) {
+        moves.push(Move::Castle { side: CastleSide::KingSide });
+    }
+
+    if is_castle_valid(state, CastleSide::QueenSide){
+        moves.push(Move::Castle { side: CastleSide::QueenSide });
+    }
+
+    for piece in Piece::ALL {
+        for from in state.board.get_piece_positions(piece, state.turn) {
+            for to in get_bitmask_positions(piece_legal_move_bitboard(state, piece, from, state.turn)) {
+                if piece == Piece::Pawn && (to / 8) == (if state.turn == Color::White { 7 } else { 0 }) {
+                    for piece in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight] {
+                        moves.push(Move::Promotion { from, to, promotion: piece });
+                    }
                 } else {
                     moves.push(Move::Normal { piece, from, to });
                 }
             }
         }
     }
-    // inefficient because we are calling chess_move twice technically?
-    let mut out = Vec::new();
-    for mv in moves {
-        if let Some(undo) = chess_move(state, mv) {
-            undo_move(state, mv, undo);
-            out.push(mv);
-        }
-    }
-    out
+
+    moves
 }
 
+pub fn print_game(state: &Chess) {
+    print_board(&state.board);
+    println!("{}", chess_to_fen(state));
+}
+
+// Optimizations:
 // Can't move unless resolve check
-// FEN to Board Translation
-// Board to FEN Translation
 // Prune branches? E.g. piece pinned 
+
+// Functionality
+// Check + Checkmate + Stalemate
+
 // perft
 // benchmark for speed? 
-// Check + Checkmate + Stalemate
